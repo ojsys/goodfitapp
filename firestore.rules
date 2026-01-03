@@ -1,0 +1,147 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================================================
+    // HELPER FUNCTIONS
+    // ============================================================================
+
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user is the owner of the document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Check if user owns the resource
+    function ownsResource() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    // Validate that userId in the document matches the authenticated user
+    function validUserId() {
+      return request.resource.data.userId == request.auth.uid;
+    }
+
+    // ============================================================================
+    // USER COLLECTION
+    // ============================================================================
+
+    match /users/{userId} {
+      // Users can read and write their own profile
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // ============================================================================
+    // ACTIVITIES COLLECTION
+    // ============================================================================
+
+    match /activities/{activityId} {
+      // Anyone can create an activity (with proper userId)
+      allow create: if isAuthenticated() && validUserId();
+
+      // Users can read their own activities
+      allow read: if ownsResource();
+
+      // Users can update their own activities
+      allow update: if ownsResource();
+
+      // Users can delete their own activities
+      allow delete: if ownsResource();
+
+      // TODO: Add read access for public activities when implementing social features
+      // allow read: if resource.data.isPublic == true;
+    }
+
+    // ============================================================================
+    // DAILY SUMMARIES COLLECTION
+    // ============================================================================
+
+    match /dailySummaries/{summaryId} {
+      // Users can create their own daily summaries
+      allow create: if isAuthenticated() && validUserId();
+
+      // Users can read their own daily summaries
+      allow read: if ownsResource();
+
+      // Users can update their own daily summaries
+      allow update: if ownsResource();
+
+      // Users can delete their own daily summaries
+      allow delete: if ownsResource();
+    }
+
+    // ============================================================================
+    // NOTIFICATIONS COLLECTION
+    // ============================================================================
+
+    match /notifications/{notificationId} {
+      // System can create notifications (server-side only)
+      // Users cannot create their own notifications
+      allow create: if false;
+
+      // Users can read their own notifications
+      allow read: if ownsResource();
+
+      // Users can update their own notifications (e.g., mark as read)
+      allow update: if ownsResource() &&
+                       request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['isRead', 'updatedAt']);
+
+      // Users can delete their own notifications
+      allow delete: if ownsResource();
+    }
+
+    // ============================================================================
+    // EVENTS COLLECTION (Future implementation)
+    // ============================================================================
+
+    match /events/{eventId} {
+      // Public events can be read by anyone
+      allow read: if isAuthenticated();
+
+      // Only event creators can update/delete
+      allow create: if isAuthenticated() && validUserId();
+      allow update: if ownsResource();
+      allow delete: if ownsResource();
+    }
+
+    // ============================================================================
+    // MESSAGES COLLECTION (Future implementation)
+    // ============================================================================
+
+    match /messages/{messageId} {
+      // Users can read messages where they are sender or recipient
+      allow read: if isAuthenticated() &&
+                     (resource.data.senderId == request.auth.uid ||
+                      resource.data.recipientId == request.auth.uid);
+
+      // Users can create messages where they are the sender
+      allow create: if isAuthenticated() &&
+                       request.resource.data.senderId == request.auth.uid;
+
+      // Users can update their own messages
+      allow update: if isAuthenticated() &&
+                       resource.data.senderId == request.auth.uid;
+
+      // Users can delete their own messages
+      allow delete: if isAuthenticated() &&
+                       resource.data.senderId == request.auth.uid;
+    }
+
+    // ============================================================================
+    // DEFAULT DENY
+    // ============================================================================
+
+    // Deny access to all other documents
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

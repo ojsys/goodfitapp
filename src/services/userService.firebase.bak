@@ -1,0 +1,451 @@
+/**
+ * User Service - Handles all user-related operations
+ */
+
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  serverTimestamp,
+  collection,
+  query,
+  where,
+  getDocs,
+  Timestamp,
+} from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { UserProfile, UserGoals, UserStats, OnlineStatus, ApiResponse } from '../models/types';
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+const USERS_COLLECTION = 'users';
+
+const DEFAULT_USER_GOALS: UserGoals = {
+  selectedGoals: [],
+  dailyStepGoal: 10000,
+  weeklyWorkoutGoal: 5,
+  dailyCalorieGoal: 500,
+};
+
+const DEFAULT_USER_STATS: UserStats = {
+  currentStreak: 0,
+  longestStreak: 0,
+  totalWorkouts: 0,
+  totalMinutes: 0,
+  totalCalories: 0,
+  totalDistance: 0,
+};
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Convert Firestore document to UserProfile
+ */
+const firestoreToUserProfile = (data: any, uid: string): UserProfile => {
+  return {
+    uid,
+    email: data.email || '',
+    displayName: data.displayName || '',
+    avatarUrl: data.avatarUrl,
+    onlineStatus: data.onlineStatus || 'offline',
+    bio: data.bio,
+    location: data.location,
+    weight: data.weight,
+    height: data.height,
+    dateOfBirth: data.dateOfBirth?.toDate(),
+    gender: data.gender,
+    goals: data.goals || DEFAULT_USER_GOALS,
+    stats: data.stats || DEFAULT_USER_STATS,
+    preferences: data.preferences || {
+      notificationsEnabled: true,
+      preferredActivities: [],
+      measurementSystem: 'metric',
+      shareActivities: true,
+      weekStartsOn: 'monday',
+    },
+    createdAt: data.createdAt?.toDate() || new Date(),
+    updatedAt: data.updatedAt?.toDate() || new Date(),
+  };
+};
+
+/**
+ * Convert UserProfile to Firestore document data
+ */
+const userProfileToFirestore = (profile: Partial<UserProfile>) => {
+  const data: any = {
+    ...profile,
+    updatedAt: serverTimestamp(),
+  };
+
+  // Convert Date objects to Firestore Timestamps
+  if (profile.dateOfBirth) {
+    data.dateOfBirth = Timestamp.fromDate(profile.dateOfBirth);
+  }
+
+  // Remove uid from the document data (it's stored as document ID)
+  delete data.uid;
+
+  return data;
+};
+
+// ============================================================================
+// USER CRUD OPERATIONS
+// ============================================================================
+
+/**
+ * Get user profile by ID
+ */
+export const getUserProfile = async (userId: string): Promise<ApiResponse<UserProfile>> => {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+    const userDoc = await getDoc(userDocRef);
+
+    if (!userDoc.exists()) {
+      return {
+        success: false,
+        error: 'User profile not found',
+      };
+    }
+
+    const userProfile = firestoreToUserProfile(userDoc.data(), userId);
+
+    return {
+      success: true,
+      data: userProfile,
+    };
+  } catch (error: any) {
+    console.error('Error getting user profile:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to get user profile',
+    };
+  }
+};
+
+/**
+ * Create a new user profile
+ */
+export const createUserProfile = async (
+  userId: string,
+  userData: {
+    email: string;
+    displayName: string;
+    avatarUrl?: string;
+  }
+): Promise<ApiResponse<UserProfile>> => {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+
+    const newProfile: Partial<UserProfile> = {
+      uid: userId,
+      email: userData.email,
+      displayName: userData.displayName,
+      avatarUrl: userData.avatarUrl,
+      onlineStatus: 'online',
+      goals: DEFAULT_USER_GOALS,
+      stats: DEFAULT_USER_STATS,
+      preferences: {
+        notificationsEnabled: true,
+        preferredActivities: [],
+        measurementSystem: 'metric',
+        shareActivities: true,
+        weekStartsOn: 'monday',
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const firestoreData = {
+      ...userProfileToFirestore(newProfile),
+      createdAt: serverTimestamp(),
+    };
+
+    await setDoc(userDocRef, firestoreData);
+
+    return {
+      success: true,
+      data: newProfile as UserProfile,
+      message: 'User profile created successfully',
+    };
+  } catch (error: any) {
+    console.error('Error creating user profile:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to create user profile',
+    };
+  }
+};
+
+/**
+ * Update user profile
+ */
+export const updateUserProfile = async (
+  userId: string,
+  updates: Partial<UserProfile>
+): Promise<ApiResponse<UserProfile>> => {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+
+    const firestoreUpdates = userProfileToFirestore(updates);
+
+    await updateDoc(userDocRef, firestoreUpdates);
+
+    // Get the updated profile
+    const updatedProfile = await getUserProfile(userId);
+
+    return {
+      success: true,
+      data: updatedProfile.data,
+      message: 'User profile updated successfully',
+    };
+  } catch (error: any) {
+    console.error('Error updating user profile:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to update user profile',
+    };
+  }
+};
+
+/**
+ * Update user's online status
+ */
+export const updateOnlineStatus = async (
+  userId: string,
+  status: OnlineStatus
+): Promise<ApiResponse<void>> => {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+
+    await updateDoc(userDocRef, {
+      onlineStatus: status,
+      updatedAt: serverTimestamp(),
+    });
+
+    return {
+      success: true,
+      message: 'Online status updated',
+    };
+  } catch (error: any) {
+    console.error('Error updating online status:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to update online status',
+    };
+  }
+};
+
+// ============================================================================
+// USER GOALS OPERATIONS
+// ============================================================================
+
+/**
+ * Update user goals
+ */
+export const updateUserGoals = async (
+  userId: string,
+  goals: Partial<UserGoals>
+): Promise<ApiResponse<UserGoals>> => {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+
+    // Get current goals
+    const userDoc = await getDoc(userDocRef);
+    if (!userDoc.exists()) {
+      return {
+        success: false,
+        error: 'User not found',
+      };
+    }
+
+    const currentGoals = userDoc.data()?.goals || DEFAULT_USER_GOALS;
+    const updatedGoals = { ...currentGoals, ...goals };
+
+    await updateDoc(userDocRef, {
+      goals: updatedGoals,
+      updatedAt: serverTimestamp(),
+    });
+
+    return {
+      success: true,
+      data: updatedGoals,
+      message: 'Goals updated successfully',
+    };
+  } catch (error: any) {
+    console.error('Error updating user goals:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to update goals',
+    };
+  }
+};
+
+// ============================================================================
+// USER STATS OPERATIONS
+// ============================================================================
+
+/**
+ * Update user stats
+ */
+export const updateUserStats = async (
+  userId: string,
+  stats: Partial<UserStats>
+): Promise<ApiResponse<UserStats>> => {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+
+    // Get current stats
+    const userDoc = await getDoc(userDocRef);
+    if (!userDoc.exists()) {
+      return {
+        success: false,
+        error: 'User not found',
+      };
+    }
+
+    const currentStats = userDoc.data()?.stats || DEFAULT_USER_STATS;
+    const updatedStats = { ...currentStats, ...stats };
+
+    await updateDoc(userDocRef, {
+      stats: updatedStats,
+      updatedAt: serverTimestamp(),
+    });
+
+    return {
+      success: true,
+      data: updatedStats,
+      message: 'Stats updated successfully',
+    };
+  } catch (error: any) {
+    console.error('Error updating user stats:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to update stats',
+    };
+  }
+};
+
+/**
+ * Increment user stat values
+ */
+export const incrementUserStats = async (
+  userId: string,
+  increments: {
+    totalWorkouts?: number;
+    totalMinutes?: number;
+    totalCalories?: number;
+    totalDistance?: number;
+  }
+): Promise<ApiResponse<void>> => {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+
+    // Get current stats
+    const userDoc = await getDoc(userDocRef);
+    if (!userDoc.exists()) {
+      return {
+        success: false,
+        error: 'User not found',
+      };
+    }
+
+    const currentStats = userDoc.data()?.stats || DEFAULT_USER_STATS;
+
+    const updatedStats = {
+      ...currentStats,
+      totalWorkouts: currentStats.totalWorkouts + (increments.totalWorkouts || 0),
+      totalMinutes: currentStats.totalMinutes + (increments.totalMinutes || 0),
+      totalCalories: currentStats.totalCalories + (increments.totalCalories || 0),
+      totalDistance: currentStats.totalDistance + (increments.totalDistance || 0),
+      lastActivityDate: new Date(),
+    };
+
+    await updateDoc(userDocRef, {
+      stats: updatedStats,
+      updatedAt: serverTimestamp(),
+    });
+
+    return {
+      success: true,
+      message: 'Stats incremented successfully',
+    };
+  } catch (error: any) {
+    console.error('Error incrementing user stats:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to increment stats',
+    };
+  }
+};
+
+/**
+ * Update user streak
+ */
+export const updateUserStreak = async (
+  userId: string,
+  currentStreak: number
+): Promise<ApiResponse<void>> => {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+
+    // Get current stats to check longest streak
+    const userDoc = await getDoc(userDocRef);
+    if (!userDoc.exists()) {
+      return {
+        success: false,
+        error: 'User not found',
+      };
+    }
+
+    const currentStats = userDoc.data()?.stats || DEFAULT_USER_STATS;
+    const longestStreak = Math.max(currentStats.longestStreak || 0, currentStreak);
+
+    await updateDoc(userDocRef, {
+      'stats.currentStreak': currentStreak,
+      'stats.longestStreak': longestStreak,
+      updatedAt: serverTimestamp(),
+    });
+
+    return {
+      success: true,
+      message: 'Streak updated successfully',
+    };
+  } catch (error: any) {
+    console.error('Error updating streak:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to update streak',
+    };
+  }
+};
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Get greeting based on time of day
+ */
+export const getGreeting = (): string => {
+  const hour = new Date().getHours();
+
+  if (hour < 12) {
+    return 'Good Morning';
+  } else if (hour < 18) {
+    return 'Good Afternoon';
+  } else {
+    return 'Good Evening';
+  }
+};
+
+/**
+ * Format display name (first name only or full name)
+ */
+export const getFirstName = (displayName: string): string => {
+  return displayName.split(' ')[0];
+};

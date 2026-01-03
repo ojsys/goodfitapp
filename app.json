@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "A Good Fit",
+    "slug": "a-good-fit",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#6B7B5E"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.goodfitapp.AGoodFit",
+      "usesAppleSignIn": true,
+      "googleServicesFile": "./GoogleService-Info.plist"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#6B7B5E"
+      },
+      "package": "com.goodfitapp.AGoodFit"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

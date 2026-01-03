@@ -1,0 +1,513 @@
+/**
+ * Activity Service - Handles all activity-related operations
+ * Includes cycling route tracking, calorie calculation, and activity CRUD
+ */
+
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  limit,
+  serverTimestamp,
+  Timestamp,
+} from 'firebase/firestore';
+import { db } from '../config/firebase';
+import {
+  ActivityLog,
+  ActivityType,
+  ActivityLocation,
+  ApiResponse,
+  PaginatedResponse,
+} from '../models/types';
+import { incrementUserStats } from './userService';
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+const ACTIVITIES_COLLECTION = 'activities';
+
+// MET (Metabolic Equivalent of Task) values for different activities
+const MET_VALUES: Record<ActivityType, number> = {
+  Run: 9.8,
+  Cycle: 7.5,
+  Walk: 3.5,
+  Swim: 8.0,
+  Yoga: 2.5,
+  Strength: 6.0,
+};
+
+// Average speeds for different activities (km/h)
+const AVERAGE_SPEEDS: Record<ActivityType, number> = {
+  Run: 10,
+  Cycle: 20,
+  Walk: 5,
+  Swim: 3,
+  Yoga: 0,
+  Strength: 0,
+};
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Convert Firestore document to ActivityLog
+ */
+const firestoreToActivityLog = (data: any, id: string): ActivityLog => {
+  return {
+    id,
+    userId: data.userId,
+    type: data.type,
+    title: data.title,
+    description: data.description,
+    startTime: data.startTime?.toDate() || new Date(),
+    endTime: data.endTime?.toDate(),
+    duration: data.duration || 0,
+    distance: data.distance,
+    caloriesBurned: data.caloriesBurned,
+    steps: data.steps,
+    metrics: data.metrics,
+    location: data.location,
+    isPublic: data.isPublic ?? true,
+    mood: data.mood,
+    notes: data.notes,
+    photos: data.photos || [],
+    likes: data.likes || 0,
+    comments: data.comments || 0,
+    createdAt: data.createdAt?.toDate() || new Date(),
+    updatedAt: data.updatedAt?.toDate() || new Date(),
+  };
+};
+
+/**
+ * Convert ActivityLog to Firestore document data
+ */
+const activityLogToFirestore = (activity: Partial<ActivityLog>) => {
+  const data: any = {
+    ...activity,
+    updatedAt: serverTimestamp(),
+  };
+
+  // Convert Date objects to Firestore Timestamps
+  if (activity.startTime) {
+    data.startTime = Timestamp.fromDate(activity.startTime);
+  }
+  if (activity.endTime) {
+    data.endTime = Timestamp.fromDate(activity.endTime);
+  }
+
+  // Remove id from the document data (it's stored as document ID)
+  delete data.id;
+
+  return data;
+};
+
+// ============================================================================
+// CALORIE CALCULATION
+// ============================================================================
+
+/**
+ * Calculate calories burned based on activity type, duration, and user weight
+ * Formula: Calories = MET × weight(kg) × duration(hours)
+ */
+export const calculateCaloriesBurned = (
+  activityType: ActivityType,
+  durationMinutes: number,
+  userWeightKg: number = 70 // Default to 70kg if not provided
+): number => {
+  const met = MET_VALUES[activityType];
+  const durationHours = durationMinutes / 60;
+  const calories = met * userWeightKg * durationHours;
+
+  return Math.round(calories);
+};
+
+/**
+ * Calculate distance based on activity type and duration
+ */
+export const calculateEstimatedDistance = (
+  activityType: ActivityType,
+  durationMinutes: number
+): number => {
+  const averageSpeed = AVERAGE_SPEEDS[activityType];
+  if (averageSpeed === 0) return 0;
+
+  const durationHours = durationMinutes / 60;
+  const distanceKm = averageSpeed * durationHours;
+
+  // Convert to meters
+  return Math.round(distanceKm * 1000);
+};
+
+/**
+ * Calculate pace (min/km) from distance and duration
+ */
+export const calculatePace = (distanceMeters: number, durationMinutes: number): number => {
+  if (distanceMeters === 0) return 0;
+
+  const distanceKm = distanceMeters / 1000;
+  const pace = durationMinutes / distanceKm;
+
+  return Math.round(pace * 10) / 10; // Round to 1 decimal
+};
+
+/**
+ * Calculate average speed (km/h) from distance and duration
+ */
+export const calculateAverageSpeed = (distanceMeters: number, durationMinutes: number): number => {
+  if (durationMinutes === 0) return 0;
+
+  const distanceKm = distanceMeters / 1000;
+  const durationHours = durationMinutes / 60;
+  const speed = distanceKm / durationHours;
+
+  return Math.round(speed * 10) / 10; // Round to 1 decimal
+};
+
+// ============================================================================
+// ACTIVITY CRUD OPERATIONS
+// ============================================================================
+
+/**
+ * Create a new activity log
+ */
+export const logActivity = async (
+  userId: string,
+  activityData: Partial<ActivityLog>,
+  userWeightKg?: number
+): Promise<ApiResponse<ActivityLog>> => {
+  try {
+    // Generate new activity ID
+    const activitiesRef = collection(db, ACTIVITIES_COLLECTION);
+    const newActivityRef = doc(activitiesRef);
+
+    // Calculate calories if not provided
+    let calories = activityData.caloriesBurned;
+    if (!calories && activityData.type && activityData.duration) {
+      calories = calculateCaloriesBurned(
+        activityData.type,
+        activityData.duration,
+        userWeightKg
+      );
+    }
+
+    // Calculate metrics
+    const metrics = activityData.metrics || {};
+    if (activityData.distance && activityData.duration) {
+      metrics.pace = calculatePace(activityData.distance, activityData.duration);
+      metrics.averageSpeed = calculateAverageSpeed(activityData.distance, activityData.duration);
+    }
+
+    const newActivity: Partial<ActivityLog> = {
+      ...activityData,
+      id: newActivityRef.id,
+      userId,
+      caloriesBurned: calories,
+      metrics,
+      isPublic: activityData.isPublic ?? true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const firestoreData = {
+      ...activityLogToFirestore(newActivity),
+      createdAt: serverTimestamp(),
+    };
+
+    await setDoc(newActivityRef, firestoreData);
+
+    // Update user stats
+    await incrementUserStats(userId, {
+      totalWorkouts: 1,
+      totalMinutes: activityData.duration || 0,
+      totalCalories: calories || 0,
+      totalDistance: activityData.distance || 0,
+    });
+
+    return {
+      success: true,
+      data: newActivity as ActivityLog,
+      message: 'Activity logged successfully',
+    };
+  } catch (error: any) {
+    console.error('Error logging activity:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to log activity',
+    };
+  }
+};
+
+/**
+ * Get recent activities for a user
+ */
+export const getRecentActivities = async (
+  userId: string,
+  limitCount: number = 10
+): Promise<ApiResponse<ActivityLog[]>> => {
+  try {
+    const activitiesRef = collection(db, ACTIVITIES_COLLECTION);
+    const q = query(
+      activitiesRef,
+      where('userId', '==', userId),
+      orderBy('startTime', 'desc'),
+      limit(limitCount)
+    );
+
+    const querySnapshot = await getDocs(q);
+    const activities: ActivityLog[] = [];
+
+    querySnapshot.forEach((doc) => {
+      activities.push(firestoreToActivityLog(doc.data(), doc.id));
+    });
+
+    return {
+      success: true,
+      data: activities,
+    };
+  } catch (error: any) {
+    console.error('Error getting recent activities:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to get activities',
+      data: [],
+    };
+  }
+};
+
+/**
+ * Get activity by ID
+ */
+export const getActivityById = async (activityId: string): Promise<ApiResponse<ActivityLog>> => {
+  try {
+    const activityRef = doc(db, ACTIVITIES_COLLECTION, activityId);
+    const activityDoc = await getDoc(activityRef);
+
+    if (!activityDoc.exists()) {
+      return {
+        success: false,
+        error: 'Activity not found',
+      };
+    }
+
+    const activity = firestoreToActivityLog(activityDoc.data(), activityId);
+
+    return {
+      success: true,
+      data: activity,
+    };
+  } catch (error: any) {
+    console.error('Error getting activity:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to get activity',
+    };
+  }
+};
+
+/**
+ * Update an existing activity
+ */
+export const updateActivity = async (
+  activityId: string,
+  updates: Partial<ActivityLog>
+): Promise<ApiResponse<ActivityLog>> => {
+  try {
+    const activityRef = doc(db, ACTIVITIES_COLLECTION, activityId);
+
+    // Recalculate metrics if duration or distance changed
+    if (updates.distance || updates.duration) {
+      const activityDoc = await getDoc(activityRef);
+      if (activityDoc.exists()) {
+        const currentActivity = activityDoc.data();
+        const distance = updates.distance || currentActivity.distance || 0;
+        const duration = updates.duration || currentActivity.duration || 0;
+
+        if (distance && duration) {
+          updates.metrics = {
+            ...currentActivity.metrics,
+            ...updates.metrics,
+            pace: calculatePace(distance, duration),
+            averageSpeed: calculateAverageSpeed(distance, duration),
+          };
+        }
+      }
+    }
+
+    const firestoreUpdates = activityLogToFirestore(updates);
+    await updateDoc(activityRef, firestoreUpdates);
+
+    // Get the updated activity
+    const updatedActivity = await getActivityById(activityId);
+
+    return {
+      success: true,
+      data: updatedActivity.data,
+      message: 'Activity updated successfully',
+    };
+  } catch (error: any) {
+    console.error('Error updating activity:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to update activity',
+    };
+  }
+};
+
+/**
+ * Delete an activity
+ */
+export const deleteActivity = async (
+  activityId: string,
+  userId: string
+): Promise<ApiResponse<void>> => {
+  try {
+    // Get activity data before deleting to update user stats
+    const activityResponse = await getActivityById(activityId);
+    if (!activityResponse.success || !activityResponse.data) {
+      return {
+        success: false,
+        error: 'Activity not found',
+      };
+    }
+
+    const activity = activityResponse.data;
+
+    // Delete the activity
+    const activityRef = doc(db, ACTIVITIES_COLLECTION, activityId);
+    await deleteDoc(activityRef);
+
+    // Decrement user stats
+    await incrementUserStats(userId, {
+      totalWorkouts: -1,
+      totalMinutes: -(activity.duration || 0),
+      totalCalories: -(activity.caloriesBurned || 0),
+      totalDistance: -(activity.distance || 0),
+    });
+
+    return {
+      success: true,
+      message: 'Activity deleted successfully',
+    };
+  } catch (error: any) {
+    console.error('Error deleting activity:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to delete activity',
+    };
+  }
+};
+
+/**
+ * Get activities within a date range
+ */
+export const getActivitiesInDateRange = async (
+  userId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<ApiResponse<ActivityLog[]>> => {
+  try {
+    const activitiesRef = collection(db, ACTIVITIES_COLLECTION);
+    const q = query(
+      activitiesRef,
+      where('userId', '==', userId),
+      where('startTime', '>=', Timestamp.fromDate(startDate)),
+      where('startTime', '<=', Timestamp.fromDate(endDate)),
+      orderBy('startTime', 'desc')
+    );
+
+    const querySnapshot = await getDocs(q);
+    const activities: ActivityLog[] = [];
+
+    querySnapshot.forEach((doc) => {
+      activities.push(firestoreToActivityLog(doc.data(), doc.id));
+    });
+
+    return {
+      success: true,
+      data: activities,
+    };
+  } catch (error: any) {
+    console.error('Error getting activities in date range:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to get activities',
+      data: [],
+    };
+  }
+};
+
+// ============================================================================
+// ROUTE PROCESSING FOR CYCLING
+// ============================================================================
+
+/**
+ * Calculate total distance from route coordinates
+ * Uses Haversine formula for accurate distance calculation
+ */
+export const calculateRouteDistance = (coordinates: { latitude: number; longitude: number }[]): number => {
+  if (coordinates.length < 2) return 0;
+
+  let totalDistance = 0;
+
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const point1 = coordinates[i];
+    const point2 = coordinates[i + 1];
+    totalDistance += getDistanceBetweenPoints(point1, point2);
+  }
+
+  return Math.round(totalDistance); // Return in meters
+};
+
+/**
+ * Calculate distance between two GPS coordinates using Haversine formula
+ * Returns distance in meters
+ */
+function getDistanceBetweenPoints(
+  point1: { latitude: number; longitude: number },
+  point2: { latitude: number; longitude: number }
+): number {
+  const R = 6371e3; // Earth's radius in meters
+  const φ1 = (point1.latitude * Math.PI) / 180;
+  const φ2 = (point2.latitude * Math.PI) / 180;
+  const Δφ = ((point2.latitude - point1.latitude) * Math.PI) / 180;
+  const Δλ = ((point2.longitude - point1.longitude) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // Distance in meters
+}
+
+/**
+ * Calculate elevation gain from route coordinates
+ */
+export const calculateElevationGain = (
+  coordinates: { latitude: number; longitude: number; altitude?: number }[]
+): number => {
+  if (coordinates.length < 2) return 0;
+
+  let totalElevationGain = 0;
+
+  for (let i = 1; i < coordinates.length; i++) {
+    const prevAltitude = coordinates[i - 1].altitude || 0;
+    const currentAltitude = coordinates[i].altitude || 0;
+    const gain = currentAltitude - prevAltitude;
+
+    if (gain > 0) {
+      totalElevationGain += gain;
+    }
+  }
+
+  return Math.round(totalElevationGain);
+};
