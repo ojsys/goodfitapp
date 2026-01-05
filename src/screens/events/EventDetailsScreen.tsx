@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,10 @@ import {
   Platform,
   Modal,
   Pressable,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
+import eventsService, { Event } from '../../services/eventsService';
 
 // -----------------------------------------------------------------------------
 // DESIGN SYSTEM & TOKENS
@@ -142,16 +145,100 @@ const HostBadge = () => (
 // MAIN COMPONENT: Event Details & RSVP
 // -----------------------------------------------------------------------------
 
-const EventDetailsScreen = () => {
+const EventDetailsScreen = ({ navigation, route }: any) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [hasRsvp, setHasRsvp] = useState(false);
+  const [event, setEvent] = useState<Event | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [rsvpLoading, setRsvpLoading] = useState(false);
+
+  const eventId = route?.params?.eventId;
+
+  useEffect(() => {
+    loadEventDetails();
+  }, [eventId]);
+
+  const loadEventDetails = async () => {
+    if (!eventId) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await eventsService.getEvent(eventId);
+
+      if (response.success && response.data) {
+        setEvent(response.data);
+      } else {
+        Alert.alert('Error', 'Failed to load event details');
+        navigation.goBack();
+      }
+    } catch (error) {
+      console.error('Error loading event:', error);
+      Alert.alert('Error', 'Failed to load event details');
+      navigation.goBack();
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const toggleExpand = () => setIsExpanded(!isExpanded);
-  
-  const handleRSVP = () => {
-    // Simulate API call
-    setHasRsvp(!hasRsvp);
+
+  const handleRSVP = async () => {
+    if (!event) return;
+
+    try {
+      setRsvpLoading(true);
+
+      if (event.user_rsvp_status === 'going') {
+        // Cancel RSVP
+        const response = await eventsService.cancelRSVP(event.id);
+
+        if (response.success) {
+          Alert.alert('Success', 'RSVP cancelled');
+          // Reload event to get updated data
+          await loadEventDetails();
+        } else {
+          Alert.alert('Error', response.error || 'Failed to cancel RSVP');
+        }
+      } else {
+        // Create RSVP
+        const response = await eventsService.rsvpToEvent(event.id, 'going');
+
+        if (response.success) {
+          Alert.alert('Success', "You're going to this event!");
+          // Reload event to get updated data
+          await loadEventDetails();
+        } else {
+          Alert.alert('Error', response.error || 'Failed to RSVP');
+        }
+      }
+    } catch (error) {
+      console.error('Error handling RSVP:', error);
+      Alert.alert('Error', 'Something went wrong');
+    } finally {
+      setRsvpLoading(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading event...</Text>
+      </View>
+    );
+  }
+
+  if (!event) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <Text style={styles.loadingText}>Event not found</Text>
+      </View>
+    );
+  }
+
+  const hasRsvp = event.user_rsvp_status === 'going';
 
   return (
     <View style={styles.container}>
@@ -166,14 +253,14 @@ const EventDetailsScreen = () => {
         {/* HERO IMAGE SECTION */}
         <View style={styles.heroContainer}>
           <Image
-            source={{ uri: 'https://images.unsplash.com/photo-1551632811-561732d1e306?w=800&q=80' }}
+            source={{ uri: event.image_url }}
             style={styles.heroImage}
           />
           <View style={styles.heroOverlay} />
-          
+
           {/* Header Navigation (Absolute) */}
           <SafeAreaView style={styles.headerNav}>
-            <TouchableOpacity style={styles.iconButtonBlur}>
+            <TouchableOpacity style={styles.iconButtonBlur} onPress={() => navigation.goBack()}>
               <Icon name="chevron-left" size={24} color="#FFF" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconButtonBlur}>
@@ -193,19 +280,19 @@ const EventDetailsScreen = () => {
             <View style={styles.tagContainer}>
               <Text style={styles.tagText}>COMMUNITY EVENT</Text>
             </View>
-            <Text style={styles.title}>Sunday Morning Trail Run</Text>
+            <Text style={styles.title}>{event.title}</Text>
             <HostBadge />
           </View>
 
           {/* INFO GRID (2x2) */}
           <View style={styles.gridContainer}>
             <View style={styles.gridRow}>
-              <InfoCard icon="clock" label="08:00 AM" subLabel="This Sunday" />
-              <InfoCard icon="map-pin" label="Griffith Park" subLabel="Los Angeles, CA" />
+              <InfoCard icon="clock" label={event.formatted_time} subLabel={event.formatted_date} />
+              <InfoCard icon="map-pin" label={event.location_name} subLabel={event.location_address} />
             </View>
             <View style={[styles.gridRow, { marginTop: SPACING.m }]}>
-              <InfoCard icon="users" label="24 Going" subLabel="Open to all" />
-              <InfoCard icon="zap" label="Social Pace" subLabel="Beginner Friendly" />
+              <InfoCard icon="users" label={`${event.attendee_count} Going`} subLabel="Open to all" />
+              <InfoCard icon="zap" label={event.vibe} subLabel="Beginner Friendly" />
             </View>
           </View>
 
@@ -214,32 +301,30 @@ const EventDetailsScreen = () => {
           {/* DESCRIPTION */}
           <View style={styles.section}>
             <Text style={styles.sectionHeader}>About the Event</Text>
-            <Text 
+            <Text
               style={styles.descriptionText}
               numberOfLines={isExpanded ? undefined : 3}
             >
-              Join us for a refreshing morning run through the scenic trails of Griffith Park. 
-              We'll be keeping a social pace (approx. 10-11 min/mile), so it's perfect for 
-              beginners or anyone looking to enjoy the view and good company. 
-              We'll meet at the Ranger Station parking lot.
-              {'\n\n'}
-              After the run, we usually grab coffee at The Trails Cafe. Come for the fitness, stay for the friends!
+              {event.description}
             </Text>
-            <TouchableOpacity onPress={toggleExpand} style={styles.readMoreButton}>
-              <Text style={styles.readMoreText}>{isExpanded ? 'Show less' : 'Read more'}</Text>
-            </TouchableOpacity>
+            {event.description.length > 150 && (
+              <TouchableOpacity onPress={toggleExpand} style={styles.readMoreButton}>
+                <Text style={styles.readMoreText}>{isExpanded ? 'Show less' : 'Read more'}</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* WHAT TO BRING */}
-          <View style={styles.section}>
-            <Text style={styles.sectionHeader}>What to bring</Text>
-            <View style={styles.bulletList}>
-              <BulletPoint text="Water bottle (hydration is key!)" />
-              <BulletPoint text="Trail running shoes or sturdy sneakers" />
-              <BulletPoint text="Sunscreen and sunglasses" />
-              <BulletPoint text="Positive vibes ✨" />
+          {event.what_to_bring && event.what_to_bring.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionHeader}>What to bring</Text>
+              <View style={styles.bulletList}>
+                {event.what_to_bring.map((item, index) => (
+                  <BulletPoint key={index} text={item} />
+                ))}
+              </View>
             </View>
-          </View>
+          )}
 
           {/* MAP PREVIEW */}
           <View style={styles.section}>
@@ -269,18 +354,30 @@ const EventDetailsScreen = () => {
         <View style={styles.footerContent}>
           <View>
             <Text style={styles.priceLabel}>Price</Text>
-            <Text style={styles.priceValue}>Free Event</Text>
+            <Text style={styles.priceValue}>
+              {event.price_type === 'Free'
+                ? 'Free Event'
+                : event.price_amount
+                ? `$${event.price_amount}`
+                : 'Paid Event'}
+            </Text>
           </View>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
-              styles.rsvpButton, 
-              hasRsvp && styles.rsvpButtonActive
-            ]} 
+              styles.rsvpButton,
+              hasRsvp && styles.rsvpButtonActive,
+              (rsvpLoading || event.is_full) && styles.rsvpButtonDisabled
+            ]}
             onPress={handleRSVP}
             activeOpacity={0.8}
+            disabled={rsvpLoading || (event.is_full && !hasRsvp)}
           >
-            {hasRsvp ? (
+            {rsvpLoading ? (
+              <ActivityIndicator size="small" color={hasRsvp ? COLORS.primary : COLORS.surface} />
+            ) : event.is_full && !hasRsvp ? (
+              <Text style={styles.rsvpText}>Event Full</Text>
+            ) : hasRsvp ? (
               <View style={styles.rsvpContent}>
                 <Icon name="check" size={20} color={COLORS.primary} />
                 <Text style={[styles.rsvpText, { color: COLORS.primary }]}>Going</Text>
@@ -342,7 +439,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    backdropFilter: 'blur(10px)', // iOS only props, ignored on Android safely
   },
 
   // SHEET
@@ -588,6 +684,20 @@ const styles = StyleSheet.create({
   },
   rsvpText: {
     ...FONTS.button,
+  },
+  rsvpButtonDisabled: {
+    opacity: 0.5,
+  },
+
+  // Loading state
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: COLORS.textSecondary,
   },
 });
 

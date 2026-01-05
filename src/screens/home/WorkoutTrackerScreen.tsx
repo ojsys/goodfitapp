@@ -33,6 +33,16 @@ interface ActivityLog {
   tintColor: string;
 }
 
+interface NearbyMatch {
+  id: string;
+  name: string;
+  age: number;
+  distance: string;
+  activities: ActivityType[];
+  imageUrl: string;
+  availability: 'Online' | 'Offline';
+}
+
 const RECENT_LOGS: ActivityLog[] = [
   {
     id: '1',
@@ -60,6 +70,54 @@ const RECENT_LOGS: ActivityLog[] = [
     type: 'Strength',
     iconChar: '💪',
     tintColor: '#FEE2E2', // Soft red
+  },
+];
+
+const NEARBY_MATCHES: NearbyMatch[] = [
+  {
+    id: '1',
+    name: 'Sarah',
+    age: 28,
+    distance: '0.8 mi',
+    activities: ['Run', 'Yoga'],
+    imageUrl: 'https://images.unsplash.com/photo-1552058544-f2b08422138a?w=400',
+    availability: 'Online',
+  },
+  {
+    id: '2',
+    name: 'Mike',
+    age: 32,
+    distance: '1.2 mi',
+    activities: ['Cycle', 'Strength'],
+    imageUrl: 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?w=400',
+    availability: 'Online',
+  },
+  {
+    id: '3',
+    name: 'Emma',
+    age: 26,
+    distance: '1.5 mi',
+    activities: ['Swim', 'Yoga'],
+    imageUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400',
+    availability: 'Offline',
+  },
+  {
+    id: '4',
+    name: 'David',
+    age: 30,
+    distance: '2.0 mi',
+    activities: ['Run', 'Cycle'],
+    imageUrl: 'https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?w=400',
+    availability: 'Online',
+  },
+  {
+    id: '5',
+    name: 'Lisa',
+    age: 29,
+    distance: '2.3 mi',
+    activities: ['Strength', 'Walk'],
+    imageUrl: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400',
+    availability: 'Offline',
   },
 ];
 
@@ -189,6 +247,27 @@ const LogItem = ({ item, onPress }: { item: ActivityLog; onPress: () => void }) 
   </Pressable>
 );
 
+const MatchCard = ({ match, onPress }: { match: NearbyMatch; onPress: () => void }) => (
+  <Pressable onPress={onPress} style={styles.matchCard}>
+    <Image source={{ uri: match.imageUrl }} style={styles.matchImage} />
+    {match.availability === 'Online' && <View style={styles.onlineIndicator} />}
+    <View style={styles.matchOverlay}>
+      <Text style={styles.matchName}>{match.name}, {match.age}</Text>
+      <View style={styles.matchDistanceRow}>
+        <Text style={styles.matchDistanceIcon}>📍</Text>
+        <Text style={styles.matchDistance}>{match.distance}</Text>
+      </View>
+      <View style={styles.matchActivities}>
+        {match.activities.slice(0, 2).map((activity, index) => (
+          <Text key={index} style={styles.matchActivityIcon}>
+            {ACTIVITY_ICONS[activity]}
+          </Text>
+        ))}
+      </View>
+    </View>
+  </Pressable>
+);
+
 /**
  * MAIN COMPONENT: WorkoutTrackerHome
  */
@@ -225,6 +304,24 @@ const WorkoutTrackerHome: React.FC<{ navigation: any; route?: any }> = ({ naviga
   const currentStreak = userProfile?.stats.currentStreak || 0;
   const todaySteps = 5432; // Will be replaced with real data in Phase 3
   const todayCalories = 320; // Will be replaced with real data in Phase 3
+
+  // Calculate activity stats from logged activities
+  const activitiesByType = Array.isArray(recentActivities) ? recentActivities : [];
+
+  // Cycling stats
+  const cyclingActivities = activitiesByType.filter(a => a.type === 'Cycle');
+  const totalCyclingDistance = cyclingActivities.reduce((sum, a) => sum + (a.distance || 0), 0);
+  const totalCyclingRides = cyclingActivities.length;
+
+  // Running stats
+  const runningActivities = activitiesByType.filter(a => a.type === 'Run');
+  const totalRunningDistance = runningActivities.reduce((sum, a) => sum + (a.distance || 0), 0);
+  const totalRuns = runningActivities.length;
+
+  // Strength stats
+  const strengthActivities = activitiesByType.filter(a => a.type === 'Strength');
+  const totalStrengthDuration = strengthActivities.reduce((sum, a) => sum + (a.duration || 0), 0);
+  const totalStrengthWorkouts = strengthActivities.length;
 
   // Convert real activities to display format
   // Safety check: ensure recentActivities is always an array
@@ -304,34 +401,111 @@ const WorkoutTrackerHome: React.FC<{ navigation: any; route?: any }> = ({ naviga
           />
         }
       >
-        {/* HERO SECTION */}
-        <View style={styles.heroCard}>
-          <View style={styles.progressRingContainer}>
-            {/* Visual simulation of a 75% progress ring using borders */}
-            <View style={styles.outerRing}>
-              <View style={styles.innerRing}>
-                 <View style={styles.ringContent}>
-                   <Text style={styles.stepsValue}>5,432</Text>
-                   <Text style={styles.stepsLabel}>Steps</Text>
-                   <View style={styles.caloriesBadge}>
-                     <Text style={styles.fireIcon}>🔥</Text>
-                     <Text style={styles.caloriesText}>320 kcal</Text>
-                   </View>
-                 </View>
+        {/* STATS SECTION - 2x2 Grid */}
+        <View style={styles.statsContainer}>
+          {/* Row 1 */}
+          <View style={styles.statsRow}>
+            {/* Steps Card */}
+            <View style={styles.statCard}>
+              <View style={styles.statIconContainer}>
+                <Text style={styles.statIcon}>👟</Text>
+              </View>
+              <Text style={styles.statValue}>{todaySteps.toLocaleString()}</Text>
+              <Text style={styles.statLabel}>Steps</Text>
+              <View style={styles.statBadge}>
+                <Text style={styles.statBadgeIcon}>🔥</Text>
+                <Text style={styles.statBadgeText}>{todayCalories} kcal</Text>
+              </View>
+            </View>
+
+            {/* Cycling Card */}
+            <View style={styles.statCard}>
+              <View style={styles.statIconContainer}>
+                <Text style={styles.statIcon}>🚴</Text>
+              </View>
+              <Text style={styles.statValue}>
+                {(totalCyclingDistance / 1000).toFixed(1)}
+              </Text>
+              <Text style={styles.statLabel}>km Cycled</Text>
+              <View style={styles.statBadge}>
+                <Text style={styles.statBadgeIcon}>🚴</Text>
+                <Text style={styles.statBadgeText}>
+                  {totalCyclingRides} {totalCyclingRides === 1 ? 'ride' : 'rides'}
+                </Text>
               </View>
             </View>
           </View>
 
+          {/* Row 2 */}
+          <View style={styles.statsRow}>
+            {/* Running Card */}
+            <View style={styles.statCard}>
+              <View style={styles.statIconContainer}>
+                <Text style={styles.statIcon}>🏃</Text>
+              </View>
+              <Text style={styles.statValue}>
+                {(totalRunningDistance / 1000).toFixed(1)}
+              </Text>
+              <Text style={styles.statLabel}>km Run</Text>
+              <View style={styles.statBadge}>
+                <Text style={styles.statBadgeIcon}>🏃</Text>
+                <Text style={styles.statBadgeText}>
+                  {totalRuns} {totalRuns === 1 ? 'run' : 'runs'}
+                </Text>
+              </View>
+            </View>
 
-          <View style={styles.streakContainer}>
-            <Text style={styles.streakText}>
-              {currentStreak > 0 ? (
-                <>You're on a roll! <Text style={{ fontWeight: 'bold' }}>{currentStreak} day streak</Text></>
-              ) : (
-                <>Start your streak today! 🔥</>
-              )}
-            </Text>
+            {/* Strength Card */}
+            <View style={styles.statCard}>
+              <View style={styles.statIconContainer}>
+                <Text style={styles.statIcon}>💪</Text>
+              </View>
+              <Text style={styles.statValue}>
+                {totalStrengthDuration}
+              </Text>
+              <Text style={styles.statLabel}>min Trained</Text>
+              <View style={styles.statBadge}>
+                <Text style={styles.statBadgeIcon}>💪</Text>
+                <Text style={styles.statBadgeText}>
+                  {totalStrengthWorkouts} {totalStrengthWorkouts === 1 ? 'workout' : 'workouts'}
+                </Text>
+              </View>
+            </View>
           </View>
+        </View>
+
+        {/* Streak Container */}
+        <View style={styles.streakCard}>
+          <Text style={styles.streakText}>
+            {currentStreak > 0 ? (
+              <>You're on a roll! <Text style={{ fontWeight: 'bold' }}>{currentStreak} day streak</Text> 🔥</>
+            ) : (
+              <>Start your streak today! 🔥</>
+            )}
+          </Text>
+        </View>
+
+        {/* NEARBY MATCHES SECTION */}
+        <View style={styles.sectionContainer}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Nearby Matches</Text>
+            <Pressable onPress={() => navigation.navigate('MatchingDiscovery')}>
+              <Text style={styles.seeAllText}>See All</Text>
+            </Pressable>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.matchesContainer}
+          >
+            {NEARBY_MATCHES.slice(0, 4).map((match) => (
+              <MatchCard
+                key={match.id}
+                match={match}
+                onPress={() => navigation.navigate('MatchingDiscovery')}
+              />
+            ))}
+          </ScrollView>
         </View>
 
         {/* ACTIVITY GRID */}
@@ -494,88 +668,79 @@ const styles = StyleSheet.create({
     backgroundColor: '#EF4444',
   },
 
-  // HERO CARD
-  heroCard: {
-    margin: SPACING.l,
-    padding: SPACING.l,
+  // STATS SECTION - 2x2 Grid
+  statsContainer: {
+    paddingHorizontal: SPACING.l,
+    marginTop: SPACING.m,
+    marginBottom: SPACING.m,
+    gap: 12,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statCard: {
+    flex: 1,
     backgroundColor: COLORS.surface,
-    borderRadius: 24,
+    borderRadius: 16,
+    padding: SPACING.m,
     alignItems: 'center',
     ...SHADOWS.card,
   },
-  progressRingContainer: {
-    width: 200,
-    height: 200,
+  statIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#F0FDFA',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: SPACING.m,
   },
-  outerRing: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    borderWidth: 15,
-    borderColor: '#E2E8F0', // Base grey ring
-    justifyContent: 'center',
-    alignItems: 'center',
-    // In a real app, use SVG. Here we simulate "progress" by coloring borders
-    borderTopColor: COLORS.primary,
-    borderRightColor: COLORS.primary,
-    borderLeftColor: COLORS.primary,
-    // This creates a 75% look roughly
-    transform: [{ rotate: '-45deg' }],
+  statIcon: {
+    fontSize: 28,
   },
-  innerRing: {
-    width: 170,
-    height: 170,
-    borderRadius: 85,
-    justifyContent: 'center',
-    alignItems: 'center',
-    transform: [{ rotate: '45deg' }], // Counter act the parent rotation
-  },
-  ringContent: {
-    alignItems: 'center',
-  },
-  stepsValue: {
-    fontSize: 32,
+  statValue: {
+    fontSize: 28,
     fontWeight: '800',
     color: COLORS.textPrimary,
-    fontVariant: ['tabular-nums'],
+    marginBottom: 4,
   },
-  stepsLabel: {
-    fontSize: 14,
+  statLabel: {
+    fontSize: 12,
     color: COLORS.textSecondary,
-    marginBottom: SPACING.s,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
+    marginBottom: SPACING.s,
   },
-  caloriesBadge: {
+  statBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF7ED', // Orange tint
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    backgroundColor: '#FFF7ED',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
-  fireIcon: {
-    fontSize: 14,
+  statBadgeIcon: {
+    fontSize: 12,
     marginRight: 4,
   },
-  caloriesText: {
-    fontSize: 13,
+  statBadgeText: {
+    fontSize: 11,
     fontWeight: '600',
     color: '#C2410C',
   },
-  streakContainer: {
-    marginTop: SPACING.s,
-    paddingVertical: SPACING.s,
-    paddingHorizontal: SPACING.m,
+  streakCard: {
+    marginHorizontal: SPACING.l,
+    marginBottom: SPACING.m,
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.l,
     backgroundColor: '#F0FDF4',
-    borderRadius: 12,
+    borderRadius: 16,
   },
   streakText: {
     fontSize: 14,
     color: '#15803D',
+    textAlign: 'center',
   },
 
   // SECTIONS
@@ -696,6 +861,73 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     textAlign: 'center',
+  },
+
+  // MATCHING SECTION
+  matchesContainer: {
+    paddingHorizontal: SPACING.l,
+    paddingBottom: SPACING.s,
+  },
+  matchCard: {
+    width: 160,
+    height: 220,
+    borderRadius: 16,
+    marginRight: SPACING.m,
+    overflow: 'hidden',
+    backgroundColor: COLORS.surface,
+    ...SHADOWS.card,
+    position: 'relative',
+  },
+  matchImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#E5E7EB',
+  },
+  onlineIndicator: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#10B981',
+    borderWidth: 2,
+    borderColor: COLORS.surface,
+  },
+  matchOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: SPACING.m,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
+  matchName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.surface,
+    marginBottom: 4,
+  },
+  matchDistanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  matchDistanceIcon: {
+    fontSize: 10,
+    marginRight: 4,
+  },
+  matchDistance: {
+    fontSize: 11,
+    color: COLORS.surface,
+    fontWeight: '500',
+  },
+  matchActivities: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  matchActivityIcon: {
+    fontSize: 14,
   },
 
 });

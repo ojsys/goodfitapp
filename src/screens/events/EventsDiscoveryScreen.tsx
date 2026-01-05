@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,22 +12,10 @@ import {
   SafeAreaView,
   StatusBar,
   Platform,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-
-// --- Types ---
-type Event = {
-  id: string;
-  title: string;
-  image: string;
-  date: string;
-  time: string;
-  location: string;
-  attendees: number;
-  attendeeAvatars: string[];
-  vibe: 'Chill' | 'Intense' | 'Social' | 'Educational';
-  price: 'Free' | 'Paid';
-  tags: string[];
-};
+import eventsService, { Event, EventFilters } from '../../services/eventsService';
 
 // --- Constants & Theme ---
 const COLORS = {
@@ -44,77 +32,6 @@ const COLORS = {
 };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
-
-// --- Mock Data ---
-const MOCK_EVENTS: Event[] = [
-  {
-    id: '1',
-    title: 'Sunset Yoga by the Pier',
-    image: 'https://images.unsplash.com/photo-1544367563-12123d8965cd?w=800&q=80',
-    date: 'Thu, Oct 12',
-    time: '6:00 PM',
-    location: 'Santa Monica Pier',
-    attendees: 12,
-    attendeeAvatars: [
-      'https://randomuser.me/api/portraits/women/44.jpg',
-      'https://randomuser.me/api/portraits/men/32.jpg',
-      'https://randomuser.me/api/portraits/women/68.jpg',
-    ],
-    vibe: 'Chill',
-    price: 'Free',
-    tags: ['Yoga', 'Outdoors'],
-  },
-  {
-    id: '2',
-    title: 'Urban 5K Run Club',
-    image: 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=800&q=80',
-    date: 'Sat, Oct 14',
-    time: '8:00 AM',
-    location: 'Downtown Park',
-    attendees: 28,
-    attendeeAvatars: [
-      'https://randomuser.me/api/portraits/men/22.jpg',
-      'https://randomuser.me/api/portraits/women/12.jpg',
-      'https://randomuser.me/api/portraits/men/85.jpg',
-    ],
-    vibe: 'Intense',
-    price: 'Free',
-    tags: ['Running', 'Social'],
-  },
-  {
-    id: '3',
-    title: 'Mindful Meditation Circle',
-    image: 'https://images.unsplash.com/photo-1593811167562-9cef47bfc4d7?w=800&q=80',
-    date: 'Sun, Oct 15',
-    time: '10:00 AM',
-    location: 'Wellness Studio B',
-    attendees: 8,
-    attendeeAvatars: [
-      'https://randomuser.me/api/portraits/women/33.jpg',
-      'https://randomuser.me/api/portraits/women/55.jpg',
-    ],
-    vibe: 'Chill',
-    price: 'Paid',
-    tags: ['Meditation', 'Indoor'],
-  },
-  {
-    id: '4',
-    title: 'Healthy Cooking Workshop',
-    image: 'https://images.unsplash.com/photo-1556910103-1c02745a30bf?w=800&q=80',
-    date: 'Wed, Oct 18',
-    time: '6:30 PM',
-    location: 'Community Kitchen',
-    attendees: 15,
-    attendeeAvatars: [
-      'https://randomuser.me/api/portraits/men/44.jpg',
-      'https://randomuser.me/api/portraits/men/67.jpg',
-      'https://randomuser.me/api/portraits/women/89.jpg',
-    ],
-    vibe: 'Educational',
-    price: 'Paid',
-    tags: ['Nutrition', 'Social'],
-  },
-];
 
 const FILTERS = ['This Week', 'Yoga', 'Run Club', 'Social', 'Meditation', 'Hiking'];
 
@@ -165,15 +82,15 @@ const AvatarStack = ({ avatars, total }: { avatars: string[]; total: number }) =
   );
 };
 
-const EventCard = ({ event }: { event: Event }) => {
+const EventCard = ({ event, onPress }: { event: Event; onPress: () => void }) => {
   return (
-    <View style={styles.card}>
+    <Pressable style={styles.card} onPress={onPress}>
       {/* Card Header Image */}
       <View style={styles.imageContainer}>
-        <Image source={{ uri: event.image }} style={styles.cardImage} resizeMode="cover" />
+        <Image source={{ uri: event.image_url }} style={styles.cardImage} resizeMode="cover" />
         <View style={styles.badgeOverlay}>
           <VibeBadge vibe={event.vibe} />
-          {event.price === 'Free' && (
+          {event.price_type === 'Free' && (
             <View style={[styles.badge, { backgroundColor: 'rgba(0,0,0,0.6)' }]}>
               <Text style={[styles.badgeText, { color: '#FFF' }]}>Free</Text>
             </View>
@@ -184,41 +101,86 @@ const EventCard = ({ event }: { event: Event }) => {
       {/* Card Body */}
       <View style={styles.cardContent}>
         <Text style={styles.cardTitle}>{event.title}</Text>
-        
+
         <View style={styles.metaRow}>
           <Text style={styles.metaIcon}>📅</Text>
-          <Text style={styles.metaText}>{event.date} • {event.time}</Text>
+          <Text style={styles.metaText}>{event.formatted_date} • {event.formatted_time}</Text>
         </View>
         <View style={styles.metaRow}>
           <Text style={styles.metaIcon}>📍</Text>
-          <Text style={styles.metaText}>{event.location}</Text>
+          <Text style={styles.metaText}>{event.location_name}</Text>
         </View>
 
         {/* Card Footer */}
         <View style={styles.cardFooter}>
           <View style={styles.attendeeContainer}>
-            <AvatarStack avatars={event.attendeeAvatars} total={event.attendees} />
+            <AvatarStack avatars={event.attendee_avatars} total={event.attendee_count} />
             <Text style={styles.attendeeLabel}>Going</Text>
           </View>
-          
-          <Pressable 
+
+          <Pressable
             style={({ pressed }) => [
               styles.rsvpButton,
               pressed && styles.rsvpButtonPressed
             ]}
+            onPress={(e) => {
+              e.stopPropagation();
+            }}
           >
             <Text style={styles.rsvpButtonText}>RSVP</Text>
           </Pressable>
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 };
 
 // --- Main Component ---
-const EventsDiscoveryScreen = () => {
+const EventsDiscoveryScreen = ({ navigation }: any) => {
   const [activeFilter, setActiveFilter] = useState('This Week');
   const [searchQuery, setSearchQuery] = useState('');
+  const [events, setEvents] = useState<Event[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    loadEvents();
+  }, [activeFilter, searchQuery]);
+
+  const loadEvents = async () => {
+    try {
+      setLoading(true);
+      const filters: EventFilters = {
+        time: 'upcoming',
+      };
+
+      // Add search query if present
+      if (searchQuery) {
+        filters.search = searchQuery;
+      }
+
+      // Map filter to API parameters
+      if (activeFilter !== 'This Week') {
+        filters.tags = activeFilter;
+      }
+
+      const response = await eventsService.getEvents(filters);
+
+      if (response.success && response.data) {
+        setEvents(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading events:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadEvents();
+    setRefreshing(false);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -271,13 +233,42 @@ const EventsDiscoveryScreen = () => {
       </View>
 
       {/* Event Feed */}
-      <FlatList
-        data={MOCK_EVENTS}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <EventCard event={item} />}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading && !refreshing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Loading events...</Text>
+        </View>
+      ) : events.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyEmoji}>📅</Text>
+          <Text style={styles.emptyTitle}>No Events Found</Text>
+          <Text style={styles.emptyText}>
+            {searchQuery
+              ? 'Try adjusting your search or filters'
+              : 'Check back soon for upcoming events!'}
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={events}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={({ item }) => (
+            <EventCard
+              event={item}
+              onPress={() => navigation.navigate('EventDetails', { eventId: item.id, event: item })}
+            />
+          )}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={COLORS.primary}
+            />
+          }
+        />
+      )}
 
     </SafeAreaView>
   );
@@ -536,6 +527,42 @@ const styles = StyleSheet.create({
   },
   navLabelActive: {
     color: COLORS.primary,
+  },
+
+  // Loading & Empty States
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: COLORS.textSub,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+    paddingVertical: 60,
+  },
+  emptyEmoji: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: COLORS.textMain,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: COLORS.textSub,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 
