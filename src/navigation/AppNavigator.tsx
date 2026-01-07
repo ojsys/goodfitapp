@@ -23,6 +23,8 @@ import MatchingDiscoveryScreen from '../screens/home/MatchingDiscoveryScreen';
 import CyclingCommandCenterScreen from '../screens/home/CyclingCommandCenterScreen';
 import ActivityDetailScreen from '../screens/home/ActivityDetailScreen';
 import AllActivitiesScreen from '../screens/home/AllActivitiesScreen';
+import StartTrackingScreen from '../screens/home/StartTrackingScreen';
+import LiveTrackingScreen from '../screens/home/LiveTrackingScreen';
 
 // Events Screens
 import EventsDiscoveryScreen from '../screens/events/EventsDiscoveryScreen';
@@ -279,6 +281,8 @@ function RootNavigator() {
           <Stack.Screen name="CyclingCommandCenter" component={CyclingCommandCenterScreen} />
           <Stack.Screen name="AllActivities" component={AllActivitiesScreen} />
           <Stack.Screen name="ActivityDetail" component={ActivityDetailScreen} />
+          <Stack.Screen name="StartTracking" component={StartTrackingScreen} />
+          <Stack.Screen name="LiveTracking" component={LiveTrackingScreen} />
           <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
           <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
           <Stack.Screen name="SuperUserDashboard" component={SuperUserDashboardScreen} />
@@ -291,6 +295,8 @@ function RootNavigator() {
           <Stack.Screen name="CyclingCommandCenter" component={CyclingCommandCenterScreen} />
           <Stack.Screen name="AllActivities" component={AllActivitiesScreen} />
           <Stack.Screen name="ActivityDetail" component={ActivityDetailScreen} />
+          <Stack.Screen name="StartTracking" component={StartTrackingScreen} />
+          <Stack.Screen name="LiveTracking" component={LiveTrackingScreen} />
           <Stack.Screen name="EventDetails" component={EventDetailsScreen} />
           <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
           <Stack.Screen name="SuperUserDashboard" component={SuperUserDashboardScreen} />

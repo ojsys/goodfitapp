@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,10 @@ import {
   StatusBar,
   Platform,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
+import matchingService, { MatchedUser, SwipeAction } from '../../services/matchingService';
 
 // ────────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION & THEME
@@ -52,17 +55,12 @@ const FONT_SIZE = {
 };
 
 // ────────────────────────────────────────────────────────────────────────────────
-// MOCK DATA
+// HELPER FUNCTIONS
 // ────────────────────────────────────────────────────────────────────────────────
 
-const MOCK_PROFILE = {
-  id: '1',
-  name: 'Sarah',
-  age: 28,
-  distance: '2 miles away',
-  bioPrompt: 'Ask me about my post-run snack routine 🥑',
-  interests: ['Marathon Training', 'Vegan', 'Early Bird'],
-  imageUrl: 'https://images.unsplash.com/photo-1552058544-f2b08422138a?ixlib=rb-4.0.3&auto=format&fit=crop&w=900&q=80',
+const formatDistance = (distance?: number): string => {
+  if (!distance) return 'Location not shared';
+  return `${distance} mi away`;
 };
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -123,6 +121,71 @@ const ActionButton = ({
 
 export default function MatchingDiscoveryScreen() {
   const [activeTab, setActiveTab] = useState<'Buddies' | 'Vibe' | 'Community'>('Buddies');
+  const [users, setUsers] = useState<MatchedUser[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [swiping, setSwiping] = useState(false);
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const loadUsers = async () => {
+    try {
+      setLoading(true);
+      const response = await matchingService.discoverUsers();
+
+      if (response.success && response.data) {
+        setUsers(response.data);
+        setCurrentIndex(0);
+      } else {
+        Alert.alert('Error', response.error || 'Failed to load users');
+      }
+    } catch (error) {
+      console.error('Error loading users:', error);
+      Alert.alert('Error', 'Failed to load users. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSwipe = async (action: SwipeAction) => {
+    const currentUser = users[currentIndex];
+    if (!currentUser || swiping) return;
+
+    try {
+      setSwiping(true);
+      const response = await matchingService.swipeUser(currentUser.user_id, action);
+
+      if (response.success) {
+        // Check if it's a match
+        if (response.data?.is_match) {
+          Alert.alert(
+            "It's a Match! 🎉",
+            `You and ${currentUser.display_name} are now connected!`,
+            [{ text: 'Awesome!', style: 'default' }]
+          );
+        }
+
+        // Move to next user
+        if (currentIndex < users.length - 1) {
+          setCurrentIndex(currentIndex + 1);
+        } else {
+          // No more users, reload
+          await loadUsers();
+        }
+      } else {
+        Alert.alert('Error', response.error || 'Failed to swipe');
+      }
+    } catch (error) {
+      console.error('Error swiping:', error);
+      Alert.alert('Error', 'Something went wrong');
+    } finally {
+      setSwiping(false);
+    }
+  };
+
+  const currentUser = users[currentIndex];
 
   return (
     <SafeAreaView style={styles.container}>
@@ -155,67 +218,106 @@ export default function MatchingDiscoveryScreen() {
 
       {/* MAIN CONTENT: Card Stack */}
       <View style={styles.contentContainer}>
-        {/* The Card */}
-        <View style={styles.card}>
-          <Image source={{ uri: MOCK_PROFILE.imageUrl }} style={styles.cardImage} resizeMode="cover" />
-          
-          {/* Gradient Simulation Overlay */}
-          <View style={styles.gradientOverlay} />
-
-          {/* Card Content Overlay */}
-          <View style={styles.cardContent}>
-            
-            {/* Prompt Bubble */}
-            <View style={styles.promptBubble}>
-              <Text style={styles.promptText}>{MOCK_PROFILE.bioPrompt}</Text>
-              <View style={styles.promptArrow} />
-            </View>
-
-            {/* User Info */}
-            <View style={styles.infoSection}>
-              <View style={styles.nameRow}>
-                <Text style={styles.nameText}>{MOCK_PROFILE.name}, {MOCK_PROFILE.age}</Text>
-              </View>
-              <View style={styles.locationRow}>
-                <Text style={styles.locationIcon}>📍</Text>
-                <Text style={styles.locationText}>{MOCK_PROFILE.distance}</Text>
-              </View>
-
-              {/* Interests Chips */}
-              <View style={styles.chipsContainer}>
-                {MOCK_PROFILE.interests.map((interest, index) => (
-                  <Chip key={index} label={interest} />
-                ))}
-              </View>
-            </View>
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.loadingText}>Finding your perfect match...</Text>
           </View>
-        </View>
+        ) : !currentUser ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyEmoji}>😊</Text>
+            <Text style={styles.emptyTitle}>No More Users</Text>
+            <Text style={styles.emptyText}>
+              Check back later for new potential matches!
+            </Text>
+            <TouchableOpacity
+              style={styles.reloadButton}
+              onPress={loadUsers}
+            >
+              <Text style={styles.reloadButtonText}>Reload</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* The Card */}
+            <View style={styles.card}>
+              <Image
+                source={{ uri: currentUser.profile_photo }}
+                style={styles.cardImage}
+                resizeMode="cover"
+              />
+
+              {/* Gradient Simulation Overlay */}
+              <View style={styles.gradientOverlay} />
+
+              {/* Card Content Overlay */}
+              <View style={styles.cardContent}>
+
+                {/* Prompt Bubble */}
+                <View style={styles.promptBubble}>
+                  <Text style={styles.promptText}>{currentUser.prompt_question}</Text>
+                  <View style={styles.promptArrow} />
+                </View>
+
+                {/* User Info */}
+                <View style={styles.infoSection}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.nameText}>
+                      {currentUser.display_name}{currentUser.age ? `, ${currentUser.age}` : ''}
+                    </Text>
+                  </View>
+                  <View style={styles.locationRow}>
+                    <Text style={styles.locationIcon}>📍</Text>
+                    <Text style={styles.locationText}>
+                      {currentUser.location_city || formatDistance(currentUser.distance)}
+                    </Text>
+                  </View>
+
+                  {/* Interests Chips */}
+                  <View style={styles.chipsContainer}>
+                    {currentUser.favorite_activities?.map((activity, index) => (
+                      <Chip key={index} label={activity} />
+                    ))}
+                    <Chip label={currentUser.fitness_level} />
+                  </View>
+                </View>
+              </View>
+            </View>
+          </>
+        )}
       </View>
 
       {/* ACTION BAR: Swipe Actions */}
-      <View style={styles.actionBar}>
-        {/* Pass Button */}
-        <ActionButton 
-          icon="✕" 
-          color={COLORS.error} 
-          backgroundColor={COLORS.errorBackground} 
-          onPress={() => {}}
-        />
+      {!loading && currentUser && (
+        <View style={styles.actionBar}>
+          {/* Pass Button */}
+          <ActionButton
+            icon="✕"
+            color={COLORS.error}
+            backgroundColor={COLORS.errorBackground}
+            onPress={() => handleSwipe('pass')}
+          />
 
-        {/* Wave Button (Smaller, Secondary) */}
-        <ActionButton 
-          icon="👋" 
-          color="#F57F17" 
-          backgroundColor="#FFF9C4" 
-          size={50}
-          onPress={() => {}}
-        />
+          {/* Super Like Button (Smaller, Secondary) */}
+          <ActionButton
+            icon="⭐"
+            color="#F57F17"
+            backgroundColor="#FFF9C4"
+            size={50}
+            onPress={() => handleSwipe('super_like')}
+          />
 
-        {/* Message Button (Primary, Large) */}
-        <TouchableOpacity style={styles.primaryActionButton} activeOpacity={0.8}>
-           <Text style={styles.primaryActionIcon}>💬</Text>
-        </TouchableOpacity>
-      </View>
+          {/* Like Button (Primary, Large) */}
+          <TouchableOpacity
+            style={styles.primaryActionButton}
+            activeOpacity={0.8}
+            onPress={() => handleSwipe('like')}
+            disabled={swiping}
+          >
+            <Text style={styles.primaryActionIcon}>💚</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -464,5 +566,53 @@ const styles = StyleSheet.create({
   primaryActionIcon: {
     fontSize: 28,
     color: COLORS.white,
+  },
+
+  // Loading & Empty States
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: SPACING.m,
+    fontSize: FONT_SIZE.m,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.xl,
+  },
+  emptyEmoji: {
+    fontSize: 64,
+    marginBottom: SPACING.m,
+  },
+  emptyTitle: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: SPACING.s,
+  },
+  emptyText: {
+    fontSize: FONT_SIZE.m,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: SPACING.l,
+  },
+  reloadButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.m,
+    borderRadius: 24,
+    marginTop: SPACING.m,
+  },
+  reloadButtonText: {
+    color: COLORS.white,
+    fontSize: FONT_SIZE.m,
+    fontWeight: '600',
   },
 });

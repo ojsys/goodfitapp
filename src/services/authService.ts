@@ -206,6 +206,30 @@ export const authService = {
       return handleApiError(error);
     }
   },
+
+  /**
+   * Login with Google ID token
+   */
+  async googleLogin(idToken: string): Promise<ApiResponse<User>> {
+    try {
+      const response = await api.post<AuthResponse>('/auth/google-login/', {
+        id_token: idToken,
+      });
+
+      const { user, tokens } = response.data;
+
+      // Save tokens
+      await tokenManager.saveTokens(tokens.access, tokens.refresh);
+
+      return {
+        success: true,
+        data: user,
+        message: 'Google login successful',
+      };
+    } catch (error) {
+      return handleApiError(error);
+    }
+  },
 };
 
 export default authService;

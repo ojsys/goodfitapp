@@ -14,18 +14,46 @@
     "assetBundlePatterns": [
       "**/*"
     ],
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow GoodFit to track your workouts with GPS for accurate distance and route recording.",
+          "locationWhenInUsePermission": "Allow GoodFit to access your location during workouts to track distance and routes.",
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.goodfitapp.AGoodFit",
       "usesAppleSignIn": true,
-      "googleServicesFile": "./GoogleService-Info.plist"
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "GoodFit needs access to your location to track your workouts and record routes.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "GoodFit needs access to your location even when the app is in the background to track your workouts accurately.",
+        "UIBackgroundModes": ["location"]
+      },
+      "config": {
+        "googleMapsApiKey": "YOUR_IOS_GOOGLE_MAPS_API_KEY"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#6B7B5E"
       },
-      "package": "com.goodfitapp.AGoodFit"
+      "package": "com.goodfitapp.AGoodFit",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_ANDROID_GOOGLE_MAPS_API_KEY"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,8 @@ import {
 import { useUser } from '../../contexts/UserContext';
 import { useActivity } from '../../contexts/ActivityContext';
 import ActivityLoggingModal from '../../components/ActivityLoggingModal';
+import { matchingService } from '../../services/matchingService';
+import { eventsService } from '../../services/eventsService';
 
 /**
  * MOCK DATA & TYPES
@@ -274,6 +276,10 @@ const MatchCard = ({ match, onPress }: { match: NearbyMatch; onPress: () => void
 const WorkoutTrackerHome: React.FC<{ navigation: any; route?: any }> = ({ navigation, route }) => {
   const [selectedActivity, setSelectedActivity] = useState<ActivityType | null>(null);
   const [showActivityModal, setShowActivityModal] = useState(false);
+  const [nearbyMatches, setNearbyMatches] = useState<any[]>([]);
+  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
+  const [loadingMatches, setLoadingMatches] = useState(false);
+  const [loadingEvents, setLoadingEvents] = useState(false);
 
   const { userProfile, loading: userLoading, greeting, firstName } = useUser();
   const { recentActivities, loading: activitiesLoading, refreshActivities } = useActivity();
@@ -286,6 +292,42 @@ const WorkoutTrackerHome: React.FC<{ navigation: any; route?: any }> = ({ naviga
       navigation.setParams({ openModal: undefined });
     }
   }, [route?.params?.openModal]);
+
+  // Fetch nearby matches
+  useEffect(() => {
+    const fetchMatches = async () => {
+      setLoadingMatches(true);
+      try {
+        const response = await matchingService.discoverUsers();
+        if (response.success && response.data) {
+          setNearbyMatches(response.data.slice(0, 5));
+        }
+      } catch (error) {
+        console.error('Error fetching matches:', error);
+      } finally {
+        setLoadingMatches(false);
+      }
+    };
+    fetchMatches();
+  }, []);
+
+  // Fetch upcoming events
+  useEffect(() => {
+    const fetchEvents = async () => {
+      setLoadingEvents(true);
+      try {
+        const response = await eventsService.getEvents({ time: 'upcoming' });
+        if (response.success && response.data) {
+          setUpcomingEvents(response.data.slice(0, 3));
+        }
+      } catch (error) {
+        console.error('Error fetching events:', error);
+      } finally {
+        setLoadingEvents(false);
+      }
+    };
+    fetchEvents();
+  }, []);
 
   // Show loading indicator while user data is being fetched
   if (userLoading) {
@@ -485,6 +527,60 @@ const WorkoutTrackerHome: React.FC<{ navigation: any; route?: any }> = ({ naviga
           </Text>
         </View>
 
+        {/* QUICK ACTIONS - Feature Cards */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <View style={styles.quickActionsGrid}>
+            {/* GPS Tracking */}
+            <Pressable
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('StartTracking')}
+            >
+              <View style={[styles.quickActionIcon, { backgroundColor: '#DBEAFE' }]}>
+                <Text style={styles.quickActionEmoji}>📍</Text>
+              </View>
+              <Text style={styles.quickActionLabel}>GPS Tracking</Text>
+              <Text style={styles.quickActionSub}>Start workout</Text>
+            </Pressable>
+
+            {/* Events */}
+            <Pressable
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('EventsTab')}
+            >
+              <View style={[styles.quickActionIcon, { backgroundColor: '#FEF3C7' }]}>
+                <Text style={styles.quickActionEmoji}>📅</Text>
+              </View>
+              <Text style={styles.quickActionLabel}>Events</Text>
+              <Text style={styles.quickActionSub}>{upcomingEvents.length} upcoming</Text>
+            </Pressable>
+
+            {/* Find Matches */}
+            <Pressable
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('MatchingDiscovery')}
+            >
+              <View style={[styles.quickActionIcon, { backgroundColor: '#FCE7F3' }]}>
+                <Text style={styles.quickActionEmoji}>🤝</Text>
+              </View>
+              <Text style={styles.quickActionLabel}>Find Buddies</Text>
+              <Text style={styles.quickActionSub}>{nearbyMatches.length} nearby</Text>
+            </Pressable>
+
+            {/* Messages */}
+            <Pressable
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('ChatTab')}
+            >
+              <View style={[styles.quickActionIcon, { backgroundColor: '#E0F2FE' }]}>
+                <Text style={styles.quickActionEmoji}>💬</Text>
+              </View>
+              <Text style={styles.quickActionLabel}>Messages</Text>
+              <Text style={styles.quickActionSub}>Chat now</Text>
+            </Pressable>
+          </View>
+        </View>
+
         {/* NEARBY MATCHES SECTION */}
         <View style={styles.sectionContainer}>
           <View style={styles.sectionHeaderRow}>
@@ -493,19 +589,49 @@ const WorkoutTrackerHome: React.FC<{ navigation: any; route?: any }> = ({ naviga
               <Text style={styles.seeAllText}>See All</Text>
             </Pressable>
           </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.matchesContainer}
-          >
-            {NEARBY_MATCHES.slice(0, 4).map((match) => (
-              <MatchCard
-                key={match.id}
-                match={match}
-                onPress={() => navigation.navigate('MatchingDiscovery')}
-              />
-            ))}
-          </ScrollView>
+          {loadingMatches ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            </View>
+          ) : nearbyMatches.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.matchesContainer}
+            >
+              {nearbyMatches.map((match) => (
+                <Pressable
+                  key={match.user_id}
+                  onPress={() => navigation.navigate('MatchingDiscovery')}
+                  style={styles.matchCard}
+                >
+                  <Image
+                    source={{ uri: match.profile_image_url || 'https://i.pravatar.cc/300?img=' + match.user_id }}
+                    style={styles.matchImage}
+                  />
+                  <View style={styles.matchOverlay}>
+                    <Text style={styles.matchName}>{match.display_name}, {match.age}</Text>
+                    <View style={styles.matchDistanceRow}>
+                      <Text style={styles.matchDistanceIcon}>📍</Text>
+                      <Text style={styles.matchDistance}>{match.distance?.toFixed(1) || '0.0'} mi</Text>
+                    </View>
+                    <View style={styles.matchActivities}>
+                      {match.favorite_activities?.slice(0, 2).map((activity: string, index: number) => (
+                        <Text key={index} style={styles.matchActivityIcon}>
+                          {ACTIVITY_ICONS[activity as ActivityType] || '🏃'}
+                        </Text>
+                      ))}
+                    </View>
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>No matches yet</Text>
+              <Text style={styles.emptyStateSubtext}>Check back soon for potential workout buddies!</Text>
+            </View>
+          )}
         </View>
 
         {/* ACTIVITY GRID */}
@@ -928,6 +1054,47 @@ const styles = StyleSheet.create({
   },
   matchActivityIcon: {
     fontSize: 14,
+  },
+
+  // QUICK ACTIONS
+  quickActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: SPACING.l,
+    gap: 12,
+  },
+  quickActionCard: {
+    width: '48%',
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    padding: SPACING.m,
+    alignItems: 'center',
+    ...SHADOWS.card,
+  },
+  quickActionIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.s,
+  },
+  quickActionEmoji: {
+    fontSize: 28,
+  },
+  quickActionLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginBottom: 2,
+  },
+  quickActionSub: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  loadingContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
   },
 
 });
