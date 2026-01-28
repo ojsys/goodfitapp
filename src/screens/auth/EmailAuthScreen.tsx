@@ -15,6 +15,7 @@ import { useAuth } from '../../contexts/AuthContext';
 
 const COLORS = {
   primary: '#2D6A4F',
+  primaryLight: '#40916C',
   background: '#F0F7F4',
   card: '#FFFFFF',
   textMain: '#1B4332',
@@ -28,13 +29,14 @@ interface EmailAuthScreenProps {
 }
 
 export default function EmailAuthScreen({ navigation }: EmailAuthScreenProps) {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, signInOffline } = useAuth();
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
 
   const handleAuth = async () => {
     if (!email || !password) {
@@ -70,6 +72,18 @@ export default function EmailAuthScreen({ navigation }: EmailAuthScreenProps) {
       Alert.alert('Error', error.message || 'Authentication failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDemoMode = async () => {
+    setDemoLoading(true);
+    try {
+      // Use demo credentials for offline testing
+      await signInOffline('demo@example.com', 'Demo User');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to enter demo mode');
+    } finally {
+      setDemoLoading(false);
     }
   };
 
@@ -186,6 +200,25 @@ export default function EmailAuthScreen({ navigation }: EmailAuthScreenProps) {
           >
             <Text style={styles.backText}>← Back to options</Text>
           </TouchableOpacity>
+
+          {/* Demo Mode Button - for testing without network */}
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.demoButton, demoLoading && styles.buttonDisabled]}
+            onPress={handleDemoMode}
+            disabled={demoLoading}
+          >
+            {demoLoading ? (
+              <ActivityIndicator color={COLORS.primaryLight} />
+            ) : (
+              <Text style={styles.demoButtonText}>Try Demo Mode (No Network)</Text>
+            )}
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -272,5 +305,35 @@ const styles = StyleSheet.create({
   backText: {
     color: COLORS.textSub,
     fontSize: 14,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 16,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  dividerText: {
+    paddingHorizontal: 16,
+    color: COLORS.textSub,
+    fontSize: 14,
+  },
+  demoButton: {
+    backgroundColor: COLORS.background,
+    borderWidth: 2,
+    borderColor: COLORS.primaryLight,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderStyle: 'dashed',
+  },
+  demoButtonText: {
+    color: COLORS.primaryLight,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

@@ -5,6 +5,10 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { Platform } from 'react-native';
 import authService, { User } from '../services/authService';
+import {
+  offlineModeService,
+  localAuthService,
+} from '../services/localStorageService';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -20,6 +24,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   hasCompletedOnboarding: boolean;
+  isOfflineMode: boolean;
   signUp: (email: string, displayName: string, password: string, passwordConfirm: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   googleSignIn: () => Promise<void>;
@@ -27,6 +32,9 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   completeOnboarding: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  // Offline mode functions
+  signInOffline: (email: string, displayName: string) => Promise<void>;
+  toggleOfflineMode: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -37,6 +45,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
 
   useEffect(() => {
     // Initialize auth state
@@ -46,21 +55,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         const onboardingValue = await AsyncStorage.getItem(ONBOARDING_COMPLETE_KEY);
         setHasCompletedOnboarding(onboardingValue === 'true');
 
-        // Check if user is authenticated
-        const isAuthenticated = await authService.isAuthenticated();
+        // Check offline mode first
+        const offlineMode = await offlineModeService.isOfflineMode();
+        setIsOfflineMode(offlineMode);
 
-        if (isAuthenticated) {
-          // Load user profile
-          const response = await authService.getCurrentUser();
-          if (response.success && response.data) {
-            setUser(response.data);
-          } else {
-            // Token exists but invalid - clear it
-            setUser(null);
+        if (offlineMode) {
+          // Load local user
+          const localUser = await localAuthService.getLocalUser();
+          if (localUser) {
+            setUser(localUser);
+          }
+        } else {
+          // Check if user is authenticated with backend
+          const isAuthenticated = await authService.isAuthenticated();
+
+          if (isAuthenticated) {
+            // Load user profile
+            const response = await authService.getCurrentUser();
+            if (response.success && response.data) {
+              setUser(response.data);
+            } else {
+              // Token exists but invalid - clear it
+              setUser(null);
+            }
           }
         }
       } catch (error) {
         console.error('Error initializing auth:', error);
+        // On error, try loading local user as fallback
+        try {
+          const localUser = await localAuthService.getLocalUser();
+          if (localUser) {
+            setUser(localUser);
+            setIsOfflineMode(true);
+          }
+        } catch (localError) {
+          console.error('Error loading local user:', localError);
+        }
       } finally {
         setLoading(false);
       }
@@ -104,8 +135,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const signOut = async () => {
     try {
-      await authService.logout();
+      if (isOfflineMode) {
+        // Clear local user
+        await localAuthService.logoutLocalUser();
+      } else {
+        await authService.logout();
+      }
       setUser(null);
+      setIsOfflineMode(false);
       // Clear onboarding status on sign out
       await AsyncStorage.removeItem(ONBOARDING_COMPLETE_KEY);
       setHasCompletedOnboarding(false);
@@ -197,10 +234,66 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  /**
+   * Sign in using offline/local mode (for device testing without backend)
+   */
+  const signInOffline = async (email: string, displayName: string) => {
+    try {
+      // Check if local user exists with this email
+      let localUser = await localAuthService.loginLocalUser(email);
+
+      if (!localUser) {
+        // Create new local user
+        localUser = await localAuthService.registerLocalUser(email, displayName);
+      }
+
+      setUser(localUser);
+      setIsOfflineMode(true);
+    } catch (error: any) {
+      console.error('Offline sign-in error:', error);
+      throw new Error('Failed to sign in offline');
+    }
+  };
+
+  /**
+   * Toggle between offline and online mode
+   */
+  const toggleOfflineMode = async () => {
+    try {
+      const newMode = await offlineModeService.toggleOfflineMode();
+      setIsOfflineMode(newMode);
+
+      if (newMode) {
+        // Switching to offline - load local user if available
+        const localUser = await localAuthService.getLocalUser();
+        if (localUser) {
+          setUser(localUser);
+        }
+      } else {
+        // Switching to online - try to load from backend
+        const isAuthenticated = await authService.isAuthenticated();
+        if (isAuthenticated) {
+          const response = await authService.getCurrentUser();
+          if (response.success && response.data) {
+            setUser(response.data);
+          } else {
+            setUser(null);
+          }
+        } else {
+          setUser(null);
+        }
+      }
+    } catch (error: any) {
+      console.error('Error toggling offline mode:', error);
+      throw error;
+    }
+  };
+
   const value = {
     user,
     loading,
     hasCompletedOnboarding,
+    isOfflineMode,
     signUp,
     signIn,
     googleSignIn,
@@ -208,6 +301,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     signOut,
     completeOnboarding,
     refreshUser,
+    signInOffline,
+    toggleOfflineMode,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

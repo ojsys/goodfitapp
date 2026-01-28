@@ -11,6 +11,11 @@ import activityService, {
 import { LocationTracker, TrackingSession } from '../services/locationTrackingService';
 import { useAuth } from './AuthContext';
 import { useUser } from './UserContext';
+import {
+  localActivitiesService,
+  trackingSessionStorage,
+  syncQueueService,
+} from '../services/localStorageService';
 
 // ============================================================================
 // CONTEXT TYPE DEFINITION
@@ -53,7 +58,7 @@ interface ActivityProviderProps {
 }
 
 export const ActivityProvider: React.FC<ActivityProviderProps> = ({ children }) => {
-  const { user } = useAuth();
+  const { user, isOfflineMode } = useAuth();
   const { userProfile, refreshUserProfile } = useUser();
 
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
@@ -69,7 +74,7 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = ({ children }) 
   // ============================================================================
 
   /**
-   * Load recent activities when user changes
+   * Load recent activities when user or offline mode changes
    */
   useEffect(() => {
     if (user) {
@@ -77,14 +82,14 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = ({ children }) 
     } else {
       setRecentActivities([]);
     }
-  }, [user]);
+  }, [user, isOfflineMode]);
 
   // ============================================================================
   // HELPER FUNCTIONS
   // ============================================================================
 
   /**
-   * Load recent activities from Django API
+   * Load recent activities from Django API or local storage
    */
   const loadRecentActivities = async () => {
     if (!user) return;
@@ -92,6 +97,15 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = ({ children }) 
     try {
       setLoading(true);
       setError(null);
+
+      // Use local storage in offline mode
+      if (isOfflineMode) {
+        console.log('📱 Loading activities from local storage (offline mode)');
+        const localActivities = await localActivitiesService.getRecentActivities();
+        console.log('✅ Loaded', localActivities.length, 'activities from local storage');
+        setRecentActivities(localActivities);
+        return;
+      }
 
       const response = await activityService.getRecentActivities();
 
@@ -122,9 +136,16 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = ({ children }) 
         setRecentActivities(activitiesData);
       } else {
         console.log('❌ Failed to load activities:', response.error);
-        setError(response.error || 'Failed to load activities');
-        // Ensure recentActivities is always an array
-        setRecentActivities([]);
+        // Try loading from local storage as fallback
+        console.log('📱 Trying to load from local storage as fallback...');
+        const localActivities = await localActivitiesService.getRecentActivities();
+        if (localActivities.length > 0) {
+          console.log('✅ Loaded', localActivities.length, 'activities from local storage');
+          setRecentActivities(localActivities);
+        } else {
+          setError(response.error || 'Failed to load activities');
+          setRecentActivities([]);
+        }
       }
     } catch (err: any) {
       console.error('Error loading activities:', err);
@@ -134,9 +155,22 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = ({ children }) 
         console.log('Session expired, activities will reload after re-authentication');
         setRecentActivities([]);
       } else {
-        setError(err.message || 'Failed to load activities');
-        // Ensure recentActivities is always an array, even on error
-        setRecentActivities([]);
+        // Try loading from local storage as fallback
+        console.log('📱 Error occurred, trying local storage fallback...');
+        try {
+          const localActivities = await localActivitiesService.getRecentActivities();
+          if (localActivities.length > 0) {
+            console.log('✅ Loaded', localActivities.length, 'activities from local storage');
+            setRecentActivities(localActivities);
+            setError(null);
+          } else {
+            setError(err.message || 'Failed to load activities');
+            setRecentActivities([]);
+          }
+        } catch (localErr) {
+          setError(err.message || 'Failed to load activities');
+          setRecentActivities([]);
+        }
       }
     } finally {
       setLoading(false);
@@ -166,24 +200,59 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = ({ children }) 
     try {
       setError(null);
 
+      // Use local storage in offline mode
+      if (isOfflineMode) {
+        console.log('📱 Creating activity in local storage (offline mode)');
+        const newActivity = await localActivitiesService.createActivity(activityData);
+        console.log('✅ Activity created locally:', newActivity.id);
+
+        // Add to local state
+        setRecentActivities((prev) => [newActivity, ...prev]);
+
+        // Add to sync queue for later
+        await syncQueueService.addToSyncQueue(newActivity);
+
+        return true;
+      }
+
       const response = await activityService.createActivity(activityData);
 
       if (response.success && response.data) {
         // Add to local state
         setRecentActivities((prev) => [response.data!, ...prev]);
 
+        // Also save to local storage for offline access
+        await localActivitiesService.createActivity(activityData);
+
         // Refresh user profile to update stats
         await refreshUserProfile();
 
         return true;
       } else {
-        setError(response.error || 'Failed to create activity');
-        return false;
+        // API failed - save locally and queue for sync
+        console.log('📱 API failed, saving to local storage...');
+        const newActivity = await localActivitiesService.createActivity(activityData);
+        setRecentActivities((prev) => [newActivity, ...prev]);
+        await syncQueueService.addToSyncQueue(newActivity);
+
+        setError(response.error || 'Saved locally - will sync when online');
+        return true;
       }
     } catch (err: any) {
       console.error('Error creating activity:', err);
-      setError(err.message || 'Failed to create activity');
-      return false;
+
+      // Save locally on error
+      try {
+        console.log('📱 Error occurred, saving to local storage...');
+        const newActivity = await localActivitiesService.createActivity(activityData);
+        setRecentActivities((prev) => [newActivity, ...prev]);
+        await syncQueueService.addToSyncQueue(newActivity);
+        setError('Saved locally - will sync when online');
+        return true;
+      } catch (localErr) {
+        setError(err.message || 'Failed to create activity');
+        return false;
+      }
     }
   };
 
@@ -287,12 +356,37 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = ({ children }) 
       setError(null);
       setCurrentActivityType(activityType);
 
-      const success = await locationTracker.startTracking((session) => {
+      const success = await locationTracker.startTracking(async (session) => {
         setTrackingSession(session);
+
+        // Persist session to local storage for crash recovery (every 10 points)
+        if (session.routePoints.length % 10 === 0) {
+          await trackingSessionStorage.saveSession({
+            activityType,
+            startTime: new Date(Date.now() - session.duration * 1000).toISOString(),
+            routePoints: session.routePoints,
+            distance: session.distance,
+            duration: session.duration,
+            elevationGain: session.elevationGain,
+            isPaused: !session.isTracking,
+          });
+        }
       });
 
       if (success) {
         setIsTracking(true);
+
+        // Save initial tracking session
+        await trackingSessionStorage.saveSession({
+          activityType,
+          startTime: new Date().toISOString(),
+          routePoints: [],
+          distance: 0,
+          duration: 0,
+          elevationGain: 0,
+          isPaused: false,
+        });
+
         return true;
       } else {
         setError('Failed to start location tracking');
@@ -313,6 +407,9 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = ({ children }) 
       const finalSession = await locationTracker.stopTracking();
       setIsTracking(false);
       setTrackingSession(null);
+
+      // Clear any persisted tracking session
+      await trackingSessionStorage.clearSession();
 
       if (!user || !currentActivityType) {
         setError('Cannot save activity: missing user or activity type');
